@@ -305,14 +305,28 @@ func RunUnifiedPipelineV2(config UnifiedPipelineV2Config, experimental *parser.P
 	successful := 0
 
 	for i, structure := range ensemble {
-		// Optimize structure
-		optResult, err := optimization.OptimizeProtein(structure, config.OptimizationConfig)
+		// WAVE 11.2: Use gentle relaxation instead of aggressive L-BFGS
+		// Wright Brothers lesson: Simple > Complex!
+		relaxConfig := optimization.DefaultGentleRelaxationConfig()
+		relaxConfig.MaxSteps = 50
+
+		relaxResult, err := optimization.GentleRelax(structure, relaxConfig)
 		if err != nil {
-			// Skip failed optimizations
+			// Skip failed relaxations
 			continue
 		}
 
 		successful++
+
+		// Create opt result for compatibility
+		optResult := &optimization.OptimizationResult{
+			Strategy:      optimization.StrategyHybrid,
+			InitialEnergy: relaxResult.InitialEnergy,
+			FinalEnergy:   relaxResult.FinalEnergy,
+			EnergyChange:  relaxResult.EnergyChange,
+			Iterations:    relaxResult.Steps,
+			Converged:     relaxResult.Converged,
+		}
 
 		// Apply Vedic biasing if enabled
 		finalEnergy := optResult.FinalEnergy
