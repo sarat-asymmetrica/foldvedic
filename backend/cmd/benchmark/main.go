@@ -116,7 +116,8 @@ var benchmarkSet = []BenchmarkProtein{
 }
 
 func main() {
-	fmt.Println("=== FoldVedic.ai Wave 6: Large-scale Benchmark Validation ===\n")
+	fmt.Println("=== FoldVedic.ai Wave 6: Large-scale Benchmark Validation ===")
+	fmt.Println()
 
 	// Create data directory
 	dataDir := "testdata/benchmark"
