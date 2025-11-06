@@ -21,13 +21,19 @@ go test ./backend/...
 
 # Integration demo
 go run backend/cmd/wave1_integration_test/main.go
+
+# Run benchmark validation (Wave 6)
+go run backend/cmd/benchmark/main.go
 ```
 
 ## 📊 Status
 
-**Waves 1-5: COMPLETE** | **Wave 6: In Progress**
+**Waves 1-6: COMPLETE** | **Infrastructure Phase: DONE**
 
-Quality Score: **0.93 (EXCELLENT)**
+Infrastructure Quality: **0.93 (EXCELLENT)**
+Prediction Accuracy: **v0.1 (Foundation)** - See [Wave 6 Assessment](WAVE_6_ASSESSMENT.md)
+
+**Next Phase**: Algorithm Enhancement (Weeks 7-13)
 
 ---
 
