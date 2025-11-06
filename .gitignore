@@ -1,0 +1,85 @@
+# FoldVedic.ai - Git Ignore File
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+dist/
+build/
+*.wasm
+*.wasm.gz
+
+# Environment & secrets
+.env
+.env.local
+.env.production
+*.key
+*.pem
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+coverage/
+*.coverprofile
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Database files
+*.db
+*.sqlite
+
+# Compiled Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+backend/cmd/foldvedic
+backend/cmd/foldvedic.exe
+
+# Frontend build
+frontend/dist/
+frontend/.svelte-kit/
+frontend/build/
+frontend/package-lock.json
+frontend/yarn.lock
+
+# PDB cache (large files)
+backend/pdb_cache/
+*.pdb
+*.cif
+
+# Wave reports work-in-progress (commit only final)
+waves/*_WIP.md
+
+# Benchmarks data (too large for git)
+benchmarks/data/
+*.benchmark
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Windows
+ehthumbs.db
+
+# Linux
+.fuse_hidden*
