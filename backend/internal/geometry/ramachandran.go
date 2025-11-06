@@ -50,6 +50,47 @@ func (v Vector3) Normalize() Vector3 {
 	return Vector3{X: v.X / mag, Y: v.Y / mag, Z: v.Z / mag}
 }
 
+// Add two vectors
+func (v Vector3) Add(other Vector3) Vector3 {
+	return Vector3{X: v.X + other.X, Y: v.Y + other.Y, Z: v.Z + other.Z}
+}
+
+// Scale vector by scalar
+func (v Vector3) Scale(s float64) Vector3 {
+	return Vector3{X: v.X * s, Y: v.Y * s, Z: v.Z * s}
+}
+
+// Length returns the length of the vector (alias for Magnitude)
+func (v Vector3) Length() float64 {
+	return v.Magnitude()
+}
+
+// RotateByQuaternion rotates vector by quaternion
+func (v Vector3) RotateByQuaternion(q Quaternion) Vector3 {
+	// Convert quaternion to rotation matrix
+	qx, qy, qz, qw := q.X, q.Y, q.Z, q.W
+
+	// Rotation matrix elements
+	r00 := 1 - 2*(qy*qy+qz*qz)
+	r01 := 2 * (qx*qy - qz*qw)
+	r02 := 2 * (qx*qz + qy*qw)
+
+	r10 := 2 * (qx*qy + qz*qw)
+	r11 := 1 - 2*(qx*qx+qz*qz)
+	r12 := 2 * (qy*qz - qx*qw)
+
+	r20 := 2 * (qx*qz - qy*qw)
+	r21 := 2 * (qy*qz + qx*qw)
+	r22 := 1 - 2*(qx*qx+qy*qy)
+
+	// Apply rotation
+	return Vector3{
+		X: r00*v.X + r01*v.Y + r02*v.Z,
+		Y: r10*v.X + r11*v.Y + r12*v.Z,
+		Z: r20*v.X + r21*v.Y + r22*v.Z,
+	}
+}
+
 // RamachandranAngles holds phi and psi dihedral angles for a residue
 type RamachandranAngles struct {
 	Phi float64 // Phi dihedral angle (radians)

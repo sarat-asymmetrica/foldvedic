@@ -472,22 +472,27 @@ func initializeFromSSPrediction(sequence string, ssPred []prediction.SecondarySt
 	}
 
 	// Build 3D structure from angles
-	// Use simplified backbone builder
-	structure := buildSimpleBackbone(sequence, angles)
+	// WAVE 11.1: Use quaternion-based coordinate builder (NOVEL!)
+	structure, err := geometry.BuildProteinFromAngles(sequence, angles)
+	if err != nil {
+		// Fallback to simple builder if quaternion method fails
+		return initializeFallback(sequence)
+	}
 
 	return structure
 }
 
-// buildSimpleBackbone constructs backbone from angles
-func buildSimpleBackbone(sequence string, angles []geometry.RamachandranAngles) *parser.Protein {
+// initializeFallback creates extended chain if coordinate builder fails
+func initializeFallback(sequence string) *parser.Protein {
+	// Simple extended chain as last resort
 	protein := &parser.Protein{
-		Name:     "built",
+		Name:     "fallback",
 		Residues: make([]*parser.Residue, len(sequence)),
 		Atoms:    make([]*parser.Atom, 0, len(sequence)*4),
 	}
 
 	atomSerial := 1
-	x, y, z := 0.0, 0.0, 0.0
+	x := 0.0
 
 	for i := range sequence {
 		res := &parser.Residue{
@@ -496,43 +501,29 @@ func buildSimpleBackbone(sequence string, angles []geometry.RamachandranAngles) 
 			ChainID: "A",
 		}
 
-		// N atom
-		res.N = &parser.Atom{
-			Serial: atomSerial, Name: "N", ResName: string(sequence[i]),
-			ChainID: "A", ResSeq: i + 1,
-			X: x, Y: y, Z: z, Element: "N",
-		}
+		// N, CA, C, O along X-axis
+		res.N = &parser.Atom{Serial: atomSerial, Name: "N", ResName: string(sequence[i]),
+			ChainID: "A", ResSeq: i + 1, X: x, Y: 0, Z: 0, Element: "N"}
 		protein.Atoms = append(protein.Atoms, res.N)
 		atomSerial++
-
-		// CA atom (1.46 Å from N)
 		x += 1.46
-		res.CA = &parser.Atom{
-			Serial: atomSerial, Name: "CA", ResName: string(sequence[i]),
-			ChainID: "A", ResSeq: i + 1,
-			X: x, Y: y, Z: z, Element: "C",
-		}
+
+		res.CA = &parser.Atom{Serial: atomSerial, Name: "CA", ResName: string(sequence[i]),
+			ChainID: "A", ResSeq: i + 1, X: x, Y: 0, Z: 0, Element: "C"}
 		protein.Atoms = append(protein.Atoms, res.CA)
 		atomSerial++
-
-		// C atom (1.52 Å from CA)
 		x += 1.52
-		res.C = &parser.Atom{
-			Serial: atomSerial, Name: "C", ResName: string(sequence[i]),
-			ChainID: "A", ResSeq: i + 1,
-			X: x, Y: y, Z: z, Element: "C",
-		}
+
+		res.C = &parser.Atom{Serial: atomSerial, Name: "C", ResName: string(sequence[i]),
+			ChainID: "A", ResSeq: i + 1, X: x, Y: 0, Z: 0, Element: "C"}
 		protein.Atoms = append(protein.Atoms, res.C)
 		atomSerial++
 
-		// O atom
-		res.O = &parser.Atom{
-			Serial: atomSerial, Name: "O", ResName: string(sequence[i]),
-			ChainID: "A", ResSeq: i + 1,
-			X: x, Y: y + 1.23, Z: z, Element: "O",
-		}
+		res.O = &parser.Atom{Serial: atomSerial, Name: "O", ResName: string(sequence[i]),
+			ChainID: "A", ResSeq: i + 1, X: x, Y: 1.23, Z: 0, Element: "O"}
 		protein.Atoms = append(protein.Atoms, res.O)
 		atomSerial++
+		x += 1.33
 
 		protein.Residues[i] = res
 	}

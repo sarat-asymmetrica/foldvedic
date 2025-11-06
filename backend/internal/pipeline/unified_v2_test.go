@@ -165,24 +165,11 @@ func TestInitializeFromSSPrediction(t *testing.T) {
 	t.Logf("Initialized structure from SS prediction: %d residues", len(protein.Residues))
 }
 
-// TestBuildSimpleBackbone tests backbone construction
-func TestBuildSimpleBackbone(t *testing.T) {
+// TestInitializeFallback tests fallback coordinate builder
+func TestInitializeFallback(t *testing.T) {
 	sequence := "GAC"
 
-	// Create simple angles (extended chain)
-	angles := make([]struct{ Phi, Psi float64 }, len(sequence))
-	for i := range angles {
-		angles[i].Phi = -120.0 * 3.14159 / 180.0
-		angles[i].Psi = +120.0 * 3.14159 / 180.0
-	}
-
-	// Convert to RamachandranAngles-compatible structure
-	angleSlice := make([]interface{}, len(angles))
-	for i := range angles {
-		angleSlice[i] = angles[i]
-	}
-
-	protein := buildSimpleBackbone(sequence, nil)
+	protein := initializeFallback(sequence)
 
 	if protein == nil {
 		t.Fatal("Protein is nil")
@@ -208,7 +195,7 @@ func TestBuildSimpleBackbone(t *testing.T) {
 		t.Error("First residue missing O atom")
 	}
 
-	t.Logf("Backbone built: %d atoms for %d residues", len(protein.Atoms), len(protein.Residues))
+	t.Logf("Fallback backbone built: %d atoms for %d residues", len(protein.Atoms), len(protein.Residues))
 }
 
 // BenchmarkQuickFold benchmarks full pipeline
