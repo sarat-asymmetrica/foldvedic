@@ -180,15 +180,19 @@ func calculateHBondEnergy(distance, angle float64) float64 {
 
 // calculateHBondAngleWithH calculates N-H···O angle using explicit H atom
 // WAVE 11.4: NEW FUNCTION for accurate H-bond geometry
+//
+// The N-H···O angle is measured at H in the N-H-O chain.
+// For a linear H-bond, this angle should be 180° (H between N and O in a line).
+// We measure angle between vectors H→N (backwards) and H→O (forward).
 func calculateHBondAngleWithH(donorN, donorH, acceptorO *parser.Atom) float64 {
-	// Vector from N to H (N-H bond)
-	nToH := Vector3D{
-		X: donorH.X - donorN.X,
-		Y: donorH.Y - donorN.Y,
-		Z: donorH.Z - donorN.Z,
+	// Vector from H to N (backwards along N-H bond)
+	hToN := Vector3D{
+		X: donorN.X - donorH.X,
+		Y: donorN.Y - donorH.Y,
+		Z: donorN.Z - donorH.Z,
 	}
 
-	// Vector from H to O (H···O interaction)
+	// Vector from H to O (forward to acceptor)
 	hToO := Vector3D{
 		X: acceptorO.X - donorH.X,
 		Y: acceptorO.Y - donorH.Y,
@@ -196,12 +200,14 @@ func calculateHBondAngleWithH(donorN, donorH, acceptorO *parser.Atom) float64 {
 	}
 
 	// Normalize vectors
-	nToH = normalizeVector(nToH)
+	hToN = normalizeVector(hToN)
 	hToO = normalizeVector(hToO)
 
 	// Calculate angle using dot product
-	// This gives N-H···O angle
-	dotProduct := nToH.X*hToO.X + nToH.Y*hToO.Y + nToH.Z*hToO.Z
+	// If vectors are parallel (same direction), angle = 0°
+	// If vectors are antiparallel (opposite direction), angle = 180°
+	// For linear H-bond: H→N and H→O point opposite, so angle = 180°
+	dotProduct := hToN.X*hToO.X + hToN.Y*hToO.Y + hToN.Z*hToO.Z
 
 	// Clamp to [-1, 1] to avoid numerical errors
 	if dotProduct > 1.0 {
