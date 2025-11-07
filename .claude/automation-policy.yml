@@ -1,0 +1,238 @@
+# ASYMMETRICA AUTOMATION POLICY
+# AsymmFlow Phoenix - Rust Backend + Svelte Frontend
+# User-defined pre-authorization for agent actions
+# Version: 1.0.0
+# Last Updated: 2025-11-01
+
+# =============================================================================
+# GLOBAL SETTINGS
+# =============================================================================
+global:
+  enabled: true  # Master switch - set false to disable ALL automation
+  audit_all: true  # Log all automated actions to .claude/audit.log
+  notify_slack: false  # Slack webhook notifications (configure webhook below)
+  notify_email: false  # Email notifications (configure SMTP below)
+
+# =============================================================================
+# SAFE ZONE ACTIONS (Always allowed when global.enabled = true)
+# =============================================================================
+safe_zone:
+  run_tests: true  # cargo test, npm test
+  static_analysis: true  # cargo clippy, eslint
+  code_formatting: true  # cargo fmt, prettier
+  documentation_updates: true  # *.md files (non-code documentation)
+  performance_benchmarks: true  # cargo bench
+  dependency_audits: true  # cargo audit, npm audit
+  read_queries: true  # SELECT statements (database read-only)
+  build_operations: true  # cargo build, npm run build
+
+# =============================================================================
+# STAGING DEPLOYMENTS (Gray zone - conditional automation)
+# =============================================================================
+staging_deployments:
+  enabled: true  # Allow staging deployments if conditions met
+  conditions:
+    quality_score: ">= 9.0"  # Five Timbres harmonic mean score
+    tests_passing: true  # 100% test pass rate required
+    rollback_exists: true  # Down migration script must exist
+    migration_type: "SAFE"  # Allowed: ADD, RENAME, CREATE INDEX. Blocked: DROP, TRUNCATE
+    backup_age_hours: "< 24"  # Recent backup required (< 24 hours old)
+    human_review: false  # Set true to require approval even if conditions met
+  notifications:
+    slack: false  # Notify on Slack (if webhook configured)
+    email: false  # Email notification
+    update_schematic: true  # Update LIVE_STATE_SCHEMATIC.md automatically
+
+# =============================================================================
+# PRODUCTION DEPLOYMENTS (Unsafe zone - NEVER automate)
+# =============================================================================
+production_deployments:
+  enabled: false  # NEVER automate production deployments
+  require_human_approval: true  # Always require explicit user approval
+  require_multi_factor: false  # Optional: require 2+ people to approve
+  # Production deployments will ALWAYS be blocked and escalated to user
+
+# =============================================================================
+# CODE GENERATION (Safe zone with review gate)
+# =============================================================================
+code_generation:
+  enabled: true  # Allow code generation with conditions
+  conditions:
+    quality_score: ">= 8.5"  # Slightly lower threshold than deployment
+    compilation_success: true  # cargo check or tsc must pass
+    tests_included: true  # Unit tests must be generated alongside code
+    human_review_before_merge: true  # PR created, NOT auto-merged
+    security_validated: true  # No SQL injection, hardcoded secrets, unsafe patterns
+  notifications:
+    pr_created: true  # Comment on PR with quality metrics + evidence
+
+# =============================================================================
+# TEST EXECUTION (Safe zone - fully automated)
+# =============================================================================
+test_execution:
+  enabled: true  # Allow automated test execution
+  unit_tests: true  # cargo test --lib
+  integration_tests: true  # cargo test --test integration
+  contract_tests: true  # cargo test --test contract (requires Docker)
+  load_tests: false  # Disabled by default (expensive, manual trigger)
+  conditions:
+    docker_required: false  # If true, check Docker is running before contract tests
+  notifications:
+    on_success: false  # Don't spam for passing tests
+    on_failure: true  # Alert on test failures
+
+# =============================================================================
+# DATABASE OPERATIONS
+# =============================================================================
+database_operations:
+  # READ OPERATIONS (Always safe)
+  read_queries: true  # SELECT statements always allowed
+
+  # WRITE OPERATIONS - STAGING
+  write_queries_staging: true  # INSERT/UPDATE allowed if conditions met
+  write_conditions_staging:
+    quality_score: ">= 8.5"
+    tests_passing: true
+
+  # WRITE OPERATIONS - PRODUCTION
+  write_queries_production: false  # NEVER automate production writes
+
+  # MIGRATIONS - STAGING
+  migrations_staging:
+    enabled: true  # Allow staging migrations with strict gates
+    conditions:
+      migration_type: "SAFE"  # ADD COLUMN, RENAME, CREATE INDEX (not DROP, TRUNCATE)
+      rollback_script: true  # Down migration MUST exist
+      dry_run_success: true  # Dry-run must succeed
+      quality_score: ">= 9.0"  # Higher bar for migrations
+      backup_recent: true  # Backup < 24 hours old
+
+  # MIGRATIONS - PRODUCTION
+  migrations_production:
+    enabled: false  # NEVER automate production migrations
+    require_human_approval: true
+
+# =============================================================================
+# EXTERNAL API CALLS
+# =============================================================================
+external_api_calls:
+  enabled: false  # Disabled by default (privacy, cost, security)
+  read_only: false  # Even read-only APIs disabled
+  write_operations: false  # Never allow automated external writes
+  exceptions:  # Whitelist specific APIs if needed
+    - api.github.com  # GitHub API for PR creation (read-only)
+  require_human_approval: true  # All external API calls require approval
+
+# =============================================================================
+# AUTHENTICATION & SECURITY
+# =============================================================================
+auth_security:
+  jwt_rotation: false  # Don't automate JWT key rotation
+  rbac_changes: false  # NEVER automate role/permission changes
+  user_creation: false  # Require human approval for new users
+  password_reset: false  # Require human approval
+  session_management: false  # Don't automate session invalidation
+
+# =============================================================================
+# CONFIDENCE THRESHOLDS (Override defaults)
+# =============================================================================
+confidence_thresholds:
+  automate: 90  # Confidence >= 90% → automate (if in safe/gray zone)
+  recommend: 70  # Confidence 70-89% → recommend to user with evidence
+  present_options: 50  # Confidence 50-69% → present multiple options
+  flag_risk: 0  # Confidence < 50% → flag risk, require human judgment
+
+# =============================================================================
+# NOTIFICATION CHANNELS
+# =============================================================================
+notifications:
+  slack:
+    enabled: false  # Set true to enable Slack notifications
+    webhook_url: ""  # Slack webhook URL (keep secret, use env var)
+    channels:
+      critical: "#alerts-critical"  # Critical failures
+      high: "#alerts-high"  # Important events
+      info: "#dev-notifications"  # Routine notifications
+
+  email:
+    enabled: false  # Set true to enable email notifications
+    smtp_host: ""  # SMTP server (e.g., smtp.gmail.com)
+    smtp_port: 587  # SMTP port (587 for TLS)
+    from_address: "agent@asymmetrica.dev"  # From email address
+    recipients:
+      critical: ["sarat@asymmetrica.dev"]  # Critical alerts
+      high: ["team@asymmetrica.dev"]  # Important events
+      info: []  # Routine notifications (empty = no emails)
+
+# =============================================================================
+# AUDIT SETTINGS
+# =============================================================================
+audit:
+  log_file: ".claude/audit.log"  # Path to audit log (relative to project root)
+  log_format: "yaml"  # Format: yaml or json
+  retention_days: 90  # Keep audit logs for 90 days
+  include_evidence: true  # Include logs, metrics, screenshots in audit
+  rotate_logs: true  # Rotate logs when > 10MB
+
+# =============================================================================
+# ROLLBACK POLICIES
+# =============================================================================
+rollback:
+  auto_rollback_on_failure: true  # Automatically rollback failed actions
+  max_rollback_attempts: 3  # Try rollback up to 3 times before escalating
+  require_backup_for_migrations: true  # Block migrations if no recent backup
+  backup_age_threshold_hours: 24  # Backup must be < 24 hours old
+  notify_on_rollback: true  # Alert user when rollback occurs
+
+# =============================================================================
+# PROJECT-SPECIFIC SETTINGS (AsymmFlow Phoenix)
+# =============================================================================
+asymmflow_phoenix:
+  # Database table name case mismatch - CRITICAL BLOCKER
+  # Until fixed, block all database write operations
+  block_db_writes_until_fix: true  # TEMPORARY: Block until table names fixed
+  table_name_case: "PascalCase"  # Expected: PascalCase (e.g., "Customer")
+  query_case: "lowercase"  # Actual: lowercase (e.g., "customers")
+  fix_required: true  # Must fix before enabling db operations
+
+  # Vedic optimizations
+  vedic_enabled: true  # Use Vedic batch sizing, quaternions, harmonic validation
+  batch_size_formula: "sqrt(n) * log2(n)"  # Williams optimization
+  quality_scoring: "harmonic_mean"  # Use harmonic mean for Five Timbres
+
+  # Testing
+  min_iterations_production: 1000000  # 1M iterations for production validation
+  contract_tests_require_docker: true  # Contract tests need Docker Desktop
+
+# =============================================================================
+# USAGE EXAMPLES
+# =============================================================================
+# Example 1: Agent wants to run tests
+#   - Action: test_execution
+#   - Zone: SAFE
+#   - Policy: test_execution.enabled = true
+#   - Decision: AUTOMATE (no approval needed)
+#
+# Example 2: Agent wants to deploy migration to staging
+#   - Action: staging_deployments
+#   - Zone: GRAY
+#   - Conditions: quality_score >= 9.0, tests_passing, rollback_exists, etc.
+#   - If all conditions met: AUTOMATE
+#   - If any condition fails: BLOCK, escalate to user
+#
+# Example 3: Agent wants to deploy to production
+#   - Action: production_deployments
+#   - Zone: UNSAFE
+#   - Policy: production_deployments.enabled = false
+#   - Decision: BLOCK, require human approval (ALWAYS)
+#
+# =============================================================================
+
+# =============================================================================
+# POLICY VERSION HISTORY
+# =============================================================================
+# v1.0.0 (2025-11-01): Initial policy for AsymmFlow Phoenix
+#   - Safe zone: Tests, linting, docs, benchmarks
+#   - Gray zone: Staging deployments (conditional)
+#   - Unsafe zone: Production deployments (never automate)
+#   - Temporary blocker: Database table name case mismatch

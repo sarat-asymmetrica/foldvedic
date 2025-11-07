@@ -114,9 +114,11 @@ func main() {
 
 	// Load experimental structure for validation
 	fmt.Println("Loading experimental structure...")
-	experimental, err := parser.ParsePDB("/home/user/foldvedic/testdata/1L2Y.pdb")
+	// Use relative path from project root
+	experimental, err := parser.ParsePDB("../../../testdata/1L2Y.pdb")
 	if err != nil {
 		fmt.Printf("❌ ERROR: Could not load experimental structure: %v\n", err)
+		fmt.Printf("   Tried path: ../../../testdata/1L2Y.pdb\n")
 		return
 	}
 	fmt.Printf("✅ Loaded: %d residues, %d atoms\n\n", len(experimental.Residues), len(experimental.Atoms))

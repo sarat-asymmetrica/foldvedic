@@ -165,9 +165,12 @@ func BuildProteinFromAngles(sequence string, angles []RamachandranAngles) (*pars
 		atomSerial++
 
 		// Rotate by phi around N-CA axis
-		axis := caDir
-		phiQuat := QuaternionFromAxisAngle(axis, phi)
-		currentDir = currentDir.RotateByQuaternion(phiQuat)
+		// Skip rotation if phi is undefined (N-terminal residue)
+		if !math.IsNaN(phi) {
+			axis := caDir
+			phiQuat := QuaternionFromAxisAngle(axis, phi)
+			currentDir = currentDir.RotateByQuaternion(phiQuat)
+		}
 
 		// === PLACE C ATOM ===
 		// Rotate to account for N-CA-C bond angle
@@ -202,9 +205,12 @@ func BuildProteinFromAngles(sequence string, angles []RamachandranAngles) (*pars
 		atomSerial++
 
 		// Rotate by psi around CA-C axis
-		axis = cDir
-		psiQuat := QuaternionFromAxisAngle(axis, psi)
-		currentDir = cDir.RotateByQuaternion(psiQuat)
+		// Skip rotation if psi is undefined (C-terminal residue)
+		if !math.IsNaN(psi) {
+			psiAxis := cDir
+			psiQuat := QuaternionFromAxisAngle(psiAxis, psi)
+			currentDir = cDir.RotateByQuaternion(psiQuat)
+		}
 
 		// === PLACE O ATOM ===
 		// O is perpendicular to C, at C=O bond angle

@@ -283,6 +283,10 @@ func ExtractDihedrals(protein *parser.Protein) []geometry.RamachandranAngles {
 //
 // This is the KEY function: rebuild 3D coordinates from dihedral angles
 // using fixed bond lengths/angles. This ensures geometry is always valid!
+//
+// BUG FIX (2025-11-06): Copy coordinates residue-by-residue, matching atoms by name
+// Previous approach: Copy by atom index → WRONG (ordering mismatch)
+// New approach: Match atoms by residue index + atom name → CORRECT
 func SetDihedrals(protein *parser.Protein, angles []geometry.RamachandranAngles) error {
 	// Get sequence from existing protein
 	sequence := ""
@@ -296,13 +300,38 @@ func SetDihedrals(protein *parser.Protein, angles []geometry.RamachandranAngles)
 		return err
 	}
 
-	// Copy coordinates back to original protein
-	// This preserves pointers but updates coordinates
-	for i, atom := range protein.Atoms {
-		if i < len(newProtein.Atoms) {
-			atom.X = newProtein.Atoms[i].X
-			atom.Y = newProtein.Atoms[i].Y
-			atom.Z = newProtein.Atoms[i].Z
+	// Copy coordinates back residue-by-residue, matching atoms by name
+	// This ensures correct atom matching even if ordering differs
+	for i := 0; i < len(protein.Residues) && i < len(newProtein.Residues); i++ {
+		oldRes := protein.Residues[i]
+		newRes := newProtein.Residues[i]
+
+		// Copy N atom coordinates
+		if oldRes.N != nil && newRes.N != nil {
+			oldRes.N.X = newRes.N.X
+			oldRes.N.Y = newRes.N.Y
+			oldRes.N.Z = newRes.N.Z
+		}
+
+		// Copy CA atom coordinates
+		if oldRes.CA != nil && newRes.CA != nil {
+			oldRes.CA.X = newRes.CA.X
+			oldRes.CA.Y = newRes.CA.Y
+			oldRes.CA.Z = newRes.CA.Z
+		}
+
+		// Copy C atom coordinates
+		if oldRes.C != nil && newRes.C != nil {
+			oldRes.C.X = newRes.C.X
+			oldRes.C.Y = newRes.C.Y
+			oldRes.C.Z = newRes.C.Z
+		}
+
+		// Copy O atom coordinates
+		if oldRes.O != nil && newRes.O != nil {
+			oldRes.O.X = newRes.O.X
+			oldRes.O.Y = newRes.O.Y
+			oldRes.O.Z = newRes.O.Z
 		}
 	}
 
