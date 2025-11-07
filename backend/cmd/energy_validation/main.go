@@ -88,6 +88,31 @@ func main() {
 	}
 	fmt.Println()
 
+	// Step 3.5: Ramachandran Analysis (NEW)
+	fmt.Println("Step 3.5: Ramachandran Backbone Geometry Analysis...")
+	ramaStats := physics.GetRamachandranStatistics(nativeProtein)
+	fmt.Printf("  Residues analyzed:     %d (excluding terminals)\n", ramaStats.NumResidues)
+	fmt.Printf("  α-helix:               %d (%.1f%%)\n", ramaStats.AlphaHelix, float64(ramaStats.AlphaHelix)/float64(ramaStats.NumResidues)*100)
+	fmt.Printf("  β-sheet:               %d (%.1f%%)\n", ramaStats.BetaSheet, float64(ramaStats.BetaSheet)/float64(ramaStats.NumResidues)*100)
+	fmt.Printf("  PPII helix:            %d (%.1f%%)\n", ramaStats.PPII, float64(ramaStats.PPII)/float64(ramaStats.NumResidues)*100)
+	fmt.Printf("  Left-handed helix:     %d (%.1f%%)\n", ramaStats.LeftHelix, float64(ramaStats.LeftHelix)/float64(ramaStats.NumResidues)*100)
+	fmt.Printf("  Other (loops/turns):   %d (%.1f%%)\n", ramaStats.Other, float64(ramaStats.Other)/float64(ramaStats.NumResidues)*100)
+	fmt.Println()
+	fmt.Printf("  Allowed regions:       %.1f%% (good: >90%%, moderate: 80-90%%)\n", ramaStats.AllowedPercent)
+	fmt.Printf("  Total Rama energy:     %.2f kcal/mol\n", ramaStats.TotalEnergy)
+	fmt.Printf("  Average per residue:   %.2f kcal/mol\n", ramaStats.AvgEnergy)
+	fmt.Println()
+
+	// Quality assessment for Ramachandran
+	if ramaStats.AllowedPercent > 90 {
+		fmt.Println("✅ Excellent backbone geometry (>90% in allowed regions)")
+	} else if ramaStats.AllowedPercent > 80 {
+		fmt.Println("⚠️  Moderate backbone geometry (80-90% in allowed regions)")
+	} else {
+		fmt.Println("❌ Poor backbone geometry (<80% in allowed regions)")
+	}
+	fmt.Println()
+
 	// Step 4: Burial statistics
 	fmt.Println("Step 4: Solvation Analysis...")
 	burialStats := physics.GetBurialStatistics(nativeProtein)

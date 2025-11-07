@@ -30,6 +30,16 @@ func DetectHydrogenBonds(protein *parser.Protein) []HBond {
 		maxAngle    = 180.0 // degrees (maximum, ideal is 180°)
 	)
 
+	// WAVE 11.4 FIX: Look for explicit H atoms first
+	// Build map of residue -> backbone H atom
+	hAtomMap := make(map[int]*parser.Atom) // residue SeqNum -> H atom
+	for _, atom := range protein.Atoms {
+		// Look for backbone amide H (named "H" or "HN")
+		if atom.Element == "H" && (atom.Name == "H" || atom.Name == "HN") {
+			hAtomMap[atom.ResSeq] = atom
+		}
+	}
+
 	// Find all potential donors (backbone N atoms)
 	donors := []*parser.Atom{}
 	for _, residue := range protein.Residues {
@@ -53,9 +63,12 @@ func DetectHydrogenBonds(protein *parser.Protein) []HBond {
 			continue
 		}
 
-		// Get donor CA for angle calculation (N-CA direction as proxy for N-H)
+		// Try to find explicit H atom for this donor
+		donorH := hAtomMap[donorResidue.SeqNum]
+
+		// Fallback: Get donor CA for angle calculation if no H atom
 		donorCA := donorResidue.CA
-		if donorCA == nil {
+		if donorH == nil && donorCA == nil {
 			continue
 		}
 
@@ -70,18 +83,37 @@ func DetectHydrogenBonds(protein *parser.Protein) []HBond {
 				continue
 			}
 
-			// Calculate N···O distance
-			distance := calculateDistance(donor, acceptor)
+			var distance float64
+			var angle float64
 
-			// Check distance criterion
-			if distance < minDistance || distance > maxDistance {
-				continue
+			if donorH != nil {
+				// Use explicit H atom for accurate geometry
+				// H-bond distance is H···O (not N···O)
+				distance = calculateDistance(donorH, acceptor)
+
+				// H-bond angle is N-H···O
+				angle = calculateHBondAngleWithH(donor, donorH, acceptor)
+			} else {
+				// Fallback: Use N···O distance and N-CA proxy
+				distance = calculateDistance(donor, acceptor)
+				angle = calculateHBondAngle(donor, donorCA, acceptor)
 			}
 
-			// Calculate N-H···O angle
-			// Since we don't have explicit H atoms, use N-CA direction as proxy
-			// Real N-H vector would point away from CA
-			angle := calculateHBondAngle(donor, donorCA, acceptor)
+			// Check distance criterion
+			// For H···O: 1.5 - 2.5 Å
+			// For N···O: 2.5 - 3.5 Å
+			var minDist, maxDist float64
+			if donorH != nil {
+				minDist = 1.5
+				maxDist = 2.5
+			} else {
+				minDist = minDistance
+				maxDist = maxDistance
+			}
+
+			if distance < minDist || distance > maxDist {
+				continue
+			}
 
 			// Check angle criterion
 			if angle < minAngle {
@@ -146,8 +178,48 @@ func calculateHBondEnergy(distance, angle float64) float64 {
 	return energy
 }
 
+// calculateHBondAngleWithH calculates N-H···O angle using explicit H atom
+// WAVE 11.4: NEW FUNCTION for accurate H-bond geometry
+func calculateHBondAngleWithH(donorN, donorH, acceptorO *parser.Atom) float64 {
+	// Vector from N to H (N-H bond)
+	nToH := Vector3D{
+		X: donorH.X - donorN.X,
+		Y: donorH.Y - donorN.Y,
+		Z: donorH.Z - donorN.Z,
+	}
+
+	// Vector from H to O (H···O interaction)
+	hToO := Vector3D{
+		X: acceptorO.X - donorH.X,
+		Y: acceptorO.Y - donorH.Y,
+		Z: acceptorO.Z - donorH.Z,
+	}
+
+	// Normalize vectors
+	nToH = normalizeVector(nToH)
+	hToO = normalizeVector(hToO)
+
+	// Calculate angle using dot product
+	// This gives N-H···O angle
+	dotProduct := nToH.X*hToO.X + nToH.Y*hToO.Y + nToH.Z*hToO.Z
+
+	// Clamp to [-1, 1] to avoid numerical errors
+	if dotProduct > 1.0 {
+		dotProduct = 1.0
+	}
+	if dotProduct < -1.0 {
+		dotProduct = -1.0
+	}
+
+	angleRad := math.Acos(dotProduct)
+	angleDeg := angleRad * 180.0 / math.Pi
+
+	return angleDeg
+}
+
 // calculateHBondAngle calculates N-H···O angle
 // Uses N-CA direction as proxy for N-H since we don't have explicit H atoms
+// FALLBACK method when H atoms not available
 func calculateHBondAngle(donorN, donorCA, acceptorO *parser.Atom) float64 {
 	// Vector from N to CA (opposite of N-H direction)
 	nToCA := Vector3D{

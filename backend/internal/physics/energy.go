@@ -15,7 +15,7 @@ import (
 type EnergyComponents struct {
 	Bond          float64 // Bond stretching energy
 	Angle         float64 // Angle bending energy
-	Dihedral      float64 // Torsional energy (not yet implemented)
+	Dihedral      float64 // Ramachandran dihedral energy (backbone constraints)
 	VanDerWaals   float64 // Lennard-Jones energy
 	Electrostatic float64 // Coulomb energy
 	Total         float64 // Sum of all components
@@ -41,8 +41,8 @@ func CalculateTotalEnergy(protein *parser.Protein, vdwCutoff, elecCutoff float64
 	// Angle energy: Sum over all bond angles
 	energy.Angle = calculateAngleEnergyTotal(protein)
 
-	// Dihedral energy: Not yet implemented (Wave 1 focus on basics)
-	energy.Dihedral = 0
+	// Dihedral energy: Ramachandran potential (backbone φ,ψ constraints)
+	energy.Dihedral = RamachandranPotential(protein)
 
 	// Van der Waals: Sum over all non-bonded pairs
 	energy.VanDerWaals = calculateVanDerWaalsTotal(protein, vdwCutoff)
@@ -52,6 +52,17 @@ func CalculateTotalEnergy(protein *parser.Protein, vdwCutoff, elecCutoff float64
 
 	// Total
 	energy.Total = energy.Bond + energy.Angle + energy.Dihedral + energy.VanDerWaals + energy.Electrostatic
+
+	// Cap energy to prevent overflow
+	// Realistic protein energies: -500 to +2000 kcal/mol
+	// >10,000 indicates severe steric clashes or coordinate corruption
+	// <-10,000 indicates unphysical attraction
+	if energy.Total > 10000.0 {
+		energy.Total = 10000.0
+	}
+	if energy.Total < -10000.0 {
+		energy.Total = -10000.0
+	}
 
 	return energy
 }

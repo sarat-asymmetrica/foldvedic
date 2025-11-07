@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/sarat-asymmetrica/foldvedic/backend/internal/folding"
+	_ "github.com/sarat-asymmetrica/foldvedic/backend/internal/folding"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/optimization"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/parser"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/sampling"
@@ -38,20 +38,23 @@ func main() {
 		log.Fatalf("Failed to load native structure: %v", err)
 	}
 	fmt.Printf("✅ Loaded %d residues\n", len(nativeProtein.Residues))
-	fmt.Printf("   Sequence: %s\n", nativeProtein.Sequence)
+	fmt.Printf("   Sequence: %s\n", nativeProtein.Sequence())
 	fmt.Println()
 
 	// Step 2: Generate starting structure using Basin Explorer
 	fmt.Println("Step 2: Generating starting structure (Basin Explorer)...")
 	startTime := time.Now()
-	structures := sampling.BasinExplorer(nativeProtein.Sequence, 40)
+	structures := sampling.BasinExplorer(nativeProtein.Sequence(), 40)
 	samplingTime := time.Since(startTime)
 
 	// Find best structure
-	var startProtein *folding.Protein
+	var startProtein *parser.Protein
 	bestRMSD := 999999.9
 	for _, protein := range structures {
-		rmsd := validation.CalculateRMSD(protein, nativeProtein)
+		rmsd, err := validation.CalculateRMSD(protein, nativeProtein)
+		if err != nil {
+			continue
+		}
 		if rmsd < bestRMSD {
 			bestRMSD = rmsd
 			startProtein = protein
@@ -100,7 +103,10 @@ func main() {
 	fmt.Println("Step 6: Testing best config with multi-start (5 starts)...")
 	multiStartProtein := optimization.MultiStartLBFGS(
 		startProtein, nativeProtein, 5, best.Config)
-	multiStartRMSD := validation.CalculateRMSD(multiStartProtein, nativeProtein)
+	multiStartRMSD, err := validation.CalculateRMSD(multiStartProtein, nativeProtein)
+	if err != nil {
+		multiStartRMSD = 999.9
+	}
 
 	fmt.Println()
 	fmt.Printf("Multi-start RMSD: %.2f Å\n", multiStartRMSD)
@@ -111,12 +117,12 @@ func main() {
 	fmt.Println("Step 7: Saving results...")
 	benchmarkResults := BenchmarkResults{
 		ProteinName:     "Trp-cage (1L2Y)",
-		Sequence:        nativeProtein.Sequence,
+		Sequence:        nativeProtein.Sequence(),
 		NumResidues:     len(nativeProtein.Residues),
 		Timestamp:       time.Now(),
 		StartingRMSD:    bestRMSD,
 		TuningResults:   results,
-		BestConfig:      best.Config,
+		BestConfig:      convertTuningToLBFGSConfig(best.Config),
 		BestRMSD:        best.FinalRMSD,
 		BestImprovement: best.RMSDImprovement,
 		TotalTime:       tuningTime.Seconds(),
@@ -243,4 +249,15 @@ func harmonicMean(values []float64) float64 {
 	}
 
 	return float64(len(values)) / sum
+}
+
+func convertTuningToLBFGSConfig(tuningConfig optimization.LBFGSTuningConfig) optimization.LBFGSConfig {
+	return optimization.LBFGSConfig{
+		MaxIterations:     tuningConfig.MaxIterations,
+		GradientTolerance: tuningConfig.GradientTol,
+		InitialStepSize:   tuningConfig.StepSize,
+		EnergyTolerance:   1e-6, // Default value
+		MemorySize:        tuningConfig.MemorySize,
+		MaxStepSize:       2.0, // Default value
+	}
 }

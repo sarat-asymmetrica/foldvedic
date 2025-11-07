@@ -7,13 +7,14 @@ import (
 
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/folding"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/geometry"
+	"github.com/sarat-asymmetrica/foldvedic/backend/internal/parser"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/validation"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/vedic"
 )
 
 // EnsembleStructure holds a protein structure with quality metrics
 type EnsembleStructure struct {
-	Protein       *folding.Protein
+	Protein       *parser.Protein
 	Energy        float64
 	VedicScore    float64
 	SamplingMethod string
@@ -71,9 +72,9 @@ func EnsembleSampler(sequence string, totalStructures int) []*EnsembleStructure 
 		})
 	}
 
-	// Generate from Fragment Assembly
+	// Generate from Fragment Assembly (using wrapper)
 	fmt.Println("Generating Fragment Assembly structures...")
-	fragStructures := FragmentAssembly(sequence, numFrag)
+	fragStructures := GenerateFragmentStructures(sequence, numFrag)
 	for _, protein := range fragStructures {
 		angles := geometry.CalculateRamachandran(protein)
 		vedicResult := vedic.CalculateVedicScore(protein, angles)
@@ -104,7 +105,7 @@ func EnsembleSampler(sequence string, totalStructures int) []*EnsembleStructure 
 }
 
 // RankAndSelectDiverse ranks structures by energy+diversity and selects top k
-func RankAndSelectDiverse(ensemble []*EnsembleStructure, nativeProtein *folding.Protein, k int) []*EnsembleStructure {
+func RankAndSelectDiverse(ensemble []*EnsembleStructure, nativeProtein *parser.Protein, k int) []*EnsembleStructure {
 	if len(ensemble) == 0 {
 		return nil
 	}
@@ -114,7 +115,7 @@ func RankAndSelectDiverse(ensemble []*EnsembleStructure, nativeProtein *folding.
 	// Step 1: Calculate RMSD for all structures (for validation)
 	for _, es := range ensemble {
 		// RMSD calculation is expensive, but needed for quality assessment
-		_ = validation.CalculateRMSD(es.Protein, nativeProtein)
+		_, _ = validation.CalculateRMSD(es.Protein, nativeProtein)
 	}
 
 	// Step 2: Sort by energy (lower is better)
@@ -181,7 +182,8 @@ func RankAndSelectDiverse(ensemble []*EnsembleStructure, nativeProtein *folding.
 }
 
 // QuaternionDiversity calculates structural diversity using dihedral space distance
-func QuaternionDiversity(protein1, protein2 *folding.Protein) float64 {
+// Uses CA distance as proxy since Phi/Psi aren't stored as fields
+func QuaternionDiversity(protein1, protein2 *parser.Protein) float64 {
 	if len(protein1.Residues) != len(protein2.Residues) {
 		return 999999.9 // Incompatible structures
 	}
@@ -189,28 +191,16 @@ func QuaternionDiversity(protein1, protein2 *folding.Protein) float64 {
 	sumSqDist := 0.0
 	count := 0
 
+	// Use CA distance as proxy for conformational difference
 	for i := range protein1.Residues {
 		res1 := protein1.Residues[i]
 		res2 := protein2.Residues[i]
 
-		// Compare phi angles
-		if !math.IsNaN(res1.Phi) && !math.IsNaN(res2.Phi) {
-			// Angular distance on circle (wrap-around)
-			diff := math.Abs(res1.Phi - res2.Phi)
-			if diff > math.Pi {
-				diff = 2*math.Pi - diff
-			}
-			sumSqDist += diff * diff
-			count++
-		}
-
-		// Compare psi angles
-		if !math.IsNaN(res1.Psi) && !math.IsNaN(res2.Psi) {
-			diff := math.Abs(res1.Psi - res2.Psi)
-			if diff > math.Pi {
-				diff = 2*math.Pi - diff
-			}
-			sumSqDist += diff * diff
+		if res1.CA != nil && res2.CA != nil {
+			dx := res1.CA.X - res2.CA.X
+			dy := res1.CA.Y - res2.CA.Y
+			dz := res1.CA.Z - res2.CA.Z
+			sumSqDist += dx*dx + dy*dy + dz*dz
 			count++
 		}
 	}
@@ -219,12 +209,12 @@ func QuaternionDiversity(protein1, protein2 *folding.Protein) float64 {
 		return 0
 	}
 
-	// RMS dihedral distance
+	// RMS CA distance
 	return math.Sqrt(sumSqDist / float64(count))
 }
 
 // ConsensusRefinement runs optimization on multiple diverse structures and picks best
-func ConsensusRefinement(ensemble []*EnsembleStructure, nativeProtein *folding.Protein) (*folding.Protein, float64) {
+func ConsensusRefinement(ensemble []*EnsembleStructure, nativeProtein *parser.Protein) (*parser.Protein, float64) {
 	if len(ensemble) == 0 {
 		return nil, 999999.9
 	}
@@ -232,12 +222,18 @@ func ConsensusRefinement(ensemble []*EnsembleStructure, nativeProtein *folding.P
 	fmt.Printf("\nRunning consensus refinement on %d structures...\n", len(ensemble))
 
 	bestProtein := ensemble[0].Protein.Copy()
-	bestRMSD := validation.CalculateRMSD(bestProtein, nativeProtein)
+	bestRMSD, err := validation.CalculateRMSD(bestProtein, nativeProtein)
+	if err != nil {
+		return bestProtein, 999999.9
+	}
 
 	// Note: Actual optimization would be done here
 	// For now, just return the best structure from the ensemble
 	for i, es := range ensemble {
-		rmsd := validation.CalculateRMSD(es.Protein, nativeProtein)
+		rmsd, err := validation.CalculateRMSD(es.Protein, nativeProtein)
+		if err != nil {
+			continue
+		}
 		fmt.Printf("  Structure %d: RMSD = %.2f Å (method: %s)\n",
 			i+1, rmsd, es.SamplingMethod)
 
@@ -326,7 +322,7 @@ func ClusterStructures(ensemble []*EnsembleStructure, numClusters int) [][]*Ense
 }
 
 // SelectBestFromClusters picks the best structure from each cluster
-func SelectBestFromClusters(clusters [][]*EnsembleStructure, nativeProtein *folding.Protein) []*EnsembleStructure {
+func SelectBestFromClusters(clusters [][]*EnsembleStructure, nativeProtein *parser.Protein) []*EnsembleStructure {
 	if len(clusters) == 0 {
 		return nil
 	}
@@ -345,7 +341,10 @@ func SelectBestFromClusters(clusters [][]*EnsembleStructure, nativeProtein *fold
 		bestRMSD := 999999.9
 
 		for j, es := range cluster {
-			rmsd := validation.CalculateRMSD(es.Protein, nativeProtein)
+			rmsd, err := validation.CalculateRMSD(es.Protein, nativeProtein)
+			if err != nil {
+				continue
+			}
 			if rmsd < bestRMSD {
 				bestRMSD = rmsd
 				bestIdx = j

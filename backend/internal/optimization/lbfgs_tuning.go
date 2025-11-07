@@ -5,11 +5,13 @@ import (
 	"math"
 
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/folding"
+	"github.com/sarat-asymmetrica/foldvedic/backend/internal/parser"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/validation"
 )
 
-// LBFGSConfig holds hyperparameters for L-BFGS optimization
-type LBFGSConfig struct {
+// LBFGSTuningConfig holds hyperparameters for L-BFGS optimization tuning
+// Note: This extends LBFGSConfig from lbfgs.go with additional tuning fields
+type LBFGSTuningConfig struct {
 	StepSize        float64 // Initial step size (radians)
 	MaxIterations   int     // Maximum L-BFGS iterations
 	GradientTol     float64 // Gradient norm convergence threshold
@@ -21,7 +23,7 @@ type LBFGSConfig struct {
 
 // TuningResult holds the result of testing one configuration
 type TuningResult struct {
-	Config         LBFGSConfig
+	Config         LBFGSTuningConfig
 	FinalRMSD      float64
 	FinalEnergy    float64
 	Iterations     int
@@ -31,8 +33,8 @@ type TuningResult struct {
 }
 
 // DefaultConfigs returns a set of pre-defined configurations for grid search
-func DefaultConfigs() []LBFGSConfig {
-	return []LBFGSConfig{
+func DefaultConfigs() []LBFGSTuningConfig {
+	return []LBFGSTuningConfig{
 		// Current default configuration
 		{
 			StepSize:      0.1,
@@ -256,10 +258,13 @@ func DefaultConfigs() []LBFGSConfig {
 }
 
 // TuneLBFGS runs grid search over configurations and returns results
-func TuneLBFGS(startProtein *folding.Protein, nativeProtein *folding.Protein, configs []LBFGSConfig) []TuningResult {
+func TuneLBFGS(startProtein *parser.Protein, nativeProtein *parser.Protein, configs []LBFGSTuningConfig) []TuningResult {
 	results := make([]TuningResult, 0, len(configs))
 
-	initialRMSD := validation.CalculateRMSD(startProtein, nativeProtein)
+	initialRMSD, err := validation.CalculateRMSD(startProtein, nativeProtein)
+	if err != nil {
+		return results // Return empty if RMSD calculation fails
+	}
 
 	for i, config := range configs {
 		fmt.Printf("Testing config %d/%d: %s...\n", i+1, len(configs), config.Name)
@@ -267,13 +272,27 @@ func TuneLBFGS(startProtein *folding.Protein, nativeProtein *folding.Protein, co
 		// Create copy for this test
 		testProtein := startProtein.Copy()
 
+		// Convert tuning config to LBFGSConfig
+		lbfgsConfig := LBFGSConfig{
+			MaxIterations:     config.MaxIterations,
+			GradientTolerance: config.GradientTol,
+			InitialStepSize:   config.StepSize,
+			EnergyTolerance:   1e-6, // Default
+			MemorySize:        config.MemorySize,
+			MaxStepSize:       2.0, // Default
+		}
+
 		// Run L-BFGS with this configuration
-		// Note: This would need a modified QuaternionLBFGS that accepts config
-		// For now, use existing function and approximate
-		result := QuaternionLBFGS(testProtein, config.MaxIterations, config.GradientTol, config.StepSize)
+		result, err := MinimizeLBFGS(testProtein, lbfgsConfig)
+		if err != nil {
+			continue // Skip this config if minimization fails
+		}
 
 		// Calculate metrics
-		finalRMSD := validation.CalculateRMSD(testProtein, nativeProtein)
+		finalRMSD, err := validation.CalculateRMSD(testProtein, nativeProtein)
+		if err != nil {
+			continue
+		}
 		finalEnergy := folding.CalculateEnergy(testProtein)
 		improvement := initialRMSD - finalRMSD
 
@@ -332,31 +351,47 @@ func AdaptiveStepSize(currentEnergy, previousEnergy, currentStepSize float64) fl
 }
 
 // MultiStartLBFGS runs L-BFGS from multiple random perturbations
-func MultiStartLBFGS(protein *folding.Protein, nativeProtein *folding.Protein, numStarts int, config LBFGSConfig) *folding.Protein {
+func MultiStartLBFGS(protein *parser.Protein, nativeProtein *parser.Protein, numStarts int, config LBFGSTuningConfig) *parser.Protein {
 	bestProtein := protein.Copy()
-	bestRMSD := validation.CalculateRMSD(bestProtein, nativeProtein)
+	bestRMSD, err := validation.CalculateRMSD(bestProtein, nativeProtein)
+	if err != nil {
+		return bestProtein
+	}
 
 	fmt.Printf("Running multi-start L-BFGS with %d starting points...\n", numStarts)
+
+	// Convert tuning config to LBFGS config
+	lbfgsConfig := LBFGSConfig{
+		MaxIterations:     config.MaxIterations,
+		GradientTolerance: config.GradientTol,
+		InitialStepSize:   config.StepSize,
+		EnergyTolerance:   1e-6,
+		MemorySize:        config.MemorySize,
+		MaxStepSize:       2.0,
+	}
 
 	for i := 0; i < numStarts; i++ {
 		// Create perturbed copy
 		testProtein := protein.Copy()
 
-		// Add random perturbation to dihedrals
-		for _, residue := range testProtein.Residues {
-			if !math.IsNaN(residue.Phi) {
-				residue.Phi += (0.5 - float64(i%100)/100.0) * 0.2 // ±0.1 radians
-			}
-			if !math.IsNaN(residue.Psi) {
-				residue.Psi += (0.5 - float64((i+50)%100)/100.0) * 0.2
-			}
+		// Add random perturbation to atoms (since Phi/Psi aren't fields)
+		for _, atom := range testProtein.Atoms {
+			atom.X += (0.5 - float64(i%100)/100.0) * 0.1
+			atom.Y += (0.5 - float64((i+33)%100)/100.0) * 0.1
+			atom.Z += (0.5 - float64((i+67)%100)/100.0) * 0.1
 		}
 
 		// Run L-BFGS
-		QuaternionLBFGS(testProtein, config.MaxIterations, config.GradientTol, config.StepSize)
+		_, err := MinimizeLBFGS(testProtein, lbfgsConfig)
+		if err != nil {
+			continue
+		}
 
 		// Check if this is better
-		rmsd := validation.CalculateRMSD(testProtein, nativeProtein)
+		rmsd, err := validation.CalculateRMSD(testProtein, nativeProtein)
+		if err != nil {
+			continue
+		}
 		if rmsd < bestRMSD {
 			bestRMSD = rmsd
 			bestProtein = testProtein

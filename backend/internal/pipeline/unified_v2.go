@@ -38,6 +38,7 @@ import (
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/geometry"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/optimization"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/parser"
+	"github.com/sarat-asymmetrica/foldvedic/backend/internal/physics"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/prediction"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/sampling"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/validation"
@@ -305,6 +306,27 @@ func RunUnifiedPipelineV2(config UnifiedPipelineV2Config, experimental *parser.P
 	successful := 0
 
 	for i, structure := range ensemble {
+		// WAVE 11.2.1: VALIDATE COORDINATES BEFORE OPTIMIZATION
+		// Agent 4.5.2: Energy Stability Surgeon - Prevent Phase 2 corruption
+		_, validationReport := physics.ScoreStructureQuality(structure)
+
+		if !validationReport.IsValid {
+			// Skip structures with corrupted coordinates (NaN, Inf, broken backbone)
+			if config.Verbose && i < 3 {
+				fmt.Printf("  ⚠ Skipping structure %d: %s\n", i+1, validationReport.ValidationError)
+			}
+			continue
+		}
+
+		if validationReport.HasClashes && validationReport.ClashCount > 5 {
+			// Skip structures with severe steric clashes (>5 clashes)
+			if config.Verbose && i < 3 {
+				fmt.Printf("  ⚠ Skipping structure %d: %d severe clashes (worst: %.2f Å)\n",
+					i+1, validationReport.ClashCount, validationReport.WorstClashDist)
+			}
+			continue
+		}
+
 		// WAVE 11.2: Use gentle relaxation instead of aggressive L-BFGS
 		// Wright Brothers lesson: Simple > Complex!
 		relaxConfig := optimization.DefaultGentleRelaxationConfig()
@@ -313,6 +335,16 @@ func RunUnifiedPipelineV2(config UnifiedPipelineV2Config, experimental *parser.P
 		relaxResult, err := optimization.GentleRelax(structure, relaxConfig)
 		if err != nil {
 			// Skip failed relaxations
+			continue
+		}
+
+		// WAVE 11.2.2: VALIDATE AGAIN AFTER OPTIMIZATION
+		// Ensure optimization didn't introduce instabilities
+		_, validationAfter := physics.ScoreStructureQuality(structure)
+		if !validationAfter.IsValid || (validationAfter.HasClashes && validationAfter.ClashCount > 5) {
+			if config.Verbose && i < 3 {
+				fmt.Printf("  ⚠ Structure %d became unstable after optimization\n", i+1)
+			}
 			continue
 		}
 
@@ -342,9 +374,12 @@ func RunUnifiedPipelineV2(config UnifiedPipelineV2Config, experimental *parser.P
 			finalEnergy += contactEnergy
 		}
 
-		// Track best
-		if finalEnergy < bestEnergy {
-			bestEnergy = finalEnergy
+		// Track best (with quality penalty for structures with minor clashes)
+		clashPenalty := float64(validationAfter.ClashCount) * 100.0 // 100 kcal/mol per clash
+		finalEnergyWithPenalty := finalEnergy + clashPenalty
+
+		if finalEnergyWithPenalty < bestEnergy {
+			bestEnergy = finalEnergyWithPenalty
 			bestStructure = structure
 			bestOptResult = optResult
 		}

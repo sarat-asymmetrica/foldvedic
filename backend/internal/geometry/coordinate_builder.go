@@ -33,6 +33,7 @@
 package geometry
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/parser"
@@ -243,6 +244,12 @@ func BuildProteinFromAngles(sequence string, angles []RamachandranAngles) (*pars
 		currentPos = cPos.Add(currentDir.Scale(BondC_N))
 
 		protein.Residues[i] = res
+	}
+
+	// Add hydrogen atoms for H-bond detection
+	// WAVE 11.4: Critical fix - enables secondary structure detection
+	if err := AddHydrogens(protein); err != nil {
+		return nil, fmt.Errorf("failed to add hydrogens: %w", err)
 	}
 
 	return protein, nil

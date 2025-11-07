@@ -23,7 +23,7 @@ func main() {
 		log.Fatalf("Failed to load native structure: %v", err)
 	}
 	fmt.Printf("✅ Loaded %d residues\n", len(nativeProtein.Residues))
-	fmt.Printf("   Sequence: %s\n", nativeProtein.Sequence)
+	fmt.Printf("   Sequence: %s\n", nativeProtein.Sequence())
 	fmt.Println()
 
 	// ================================================================
@@ -33,8 +33,11 @@ func main() {
 	phase1Start := time.Now()
 
 	// Build from sequence with random dihedrals
-	phase1Protein := folding.NewProteinFromSequence(nativeProtein.Sequence)
-	phase1RMSD := validation.CalculateRMSD(phase1Protein, nativeProtein)
+	phase1Protein := folding.NewProteinFromSequence(nativeProtein.Sequence())
+	phase1RMSD, err := validation.CalculateRMSD(phase1Protein, nativeProtein)
+	if err != nil {
+		log.Fatalf("Phase 1 RMSD calculation failed: %v", err)
+	}
 	phase1Energy := folding.CalculateEnergy(phase1Protein)
 
 	phase1Duration := time.Since(phase1Start)
@@ -51,16 +54,16 @@ func main() {
 
 	// Generate structures from all 4 methods
 	fmt.Println("Generating structures...")
-	fibStructures := sampling.FibonacciSphereBasins(nativeProtein.Sequence, 25)
+	fibStructures := sampling.FibonacciSphereBasins(nativeProtein.Sequence(), 25)
 	fmt.Printf("  Fibonacci: %d structures\n", len(fibStructures))
 
-	mcStructures := sampling.VedicMonteCarlo(nativeProtein.Sequence, 10)
+	mcStructures := sampling.VedicMonteCarlo(nativeProtein.Sequence(), 10)
 	fmt.Printf("  Monte Carlo: %d structures\n", len(mcStructures))
 
-	fragStructures := sampling.FragmentAssembly(nativeProtein.Sequence, 25)
+	fragStructures := sampling.GenerateFragmentStructures(nativeProtein.Sequence(), 25)
 	fmt.Printf("  Fragment Assembly: %d structures\n", len(fragStructures))
 
-	basinStructures := sampling.BasinExplorer(nativeProtein.Sequence, 40)
+	basinStructures := sampling.BasinExplorer(nativeProtein.Sequence(), 40)
 	fmt.Printf("  Basin Explorer: %d structures\n", len(basinStructures))
 
 	// Combine all structures
@@ -73,12 +76,15 @@ func main() {
 
 	// Find best structure
 	fmt.Println("Evaluating structures...")
-	var phase2BestProtein *folding.Protein
+	var phase2BestProtein *parser.Protein
 	phase2BestRMSD := 999999.9
 	phase2BestEnergy := 0.0
 
 	for _, protein := range allStructures {
-		rmsd := validation.CalculateRMSD(protein, nativeProtein)
+		rmsd, err := validation.CalculateRMSD(protein, nativeProtein)
+		if err != nil {
+			continue // Skip this structure if RMSD calculation fails
+		}
 		if rmsd < phase2BestRMSD {
 			phase2BestRMSD = rmsd
 			phase2BestProtein = protein
@@ -107,45 +113,107 @@ func main() {
 	fmt.Println()
 	fmt.Println("Agent 3.1: Enhanced Gentle Relaxation...")
 	protein31 := phase2BestProtein.Copy()
-	optimization.EnhancedGentleRelaxation(protein31, 100, 0.001)
-	rmsd31 := validation.CalculateRMSD(protein31, nativeProtein)
+	config := optimization.DefaultGentleRelaxationConfig()
+	config.MaxSteps = 100
+	config.StepSize = 0.001
+	result31, err := optimization.GentleRelax(protein31, config)
+	var rmsd31 float64
+	if err != nil {
+		log.Printf("Agent 3.1 failed: %v", err)
+		rmsd31 = 999.9
+	} else {
+		rmsd31, err = validation.CalculateRMSD(protein31, nativeProtein)
+		if err != nil {
+			rmsd31 = 999.9
+		}
+	}
 	energy31 := folding.CalculateEnergy(protein31)
 	fmt.Printf("  RMSD: %.2f Å, Energy: %.2f kcal/mol\n", rmsd31, energy31)
+	if result31 != nil {
+		fmt.Printf("  Steps: %d\n", result31.Steps)
+	}
 
 	// Agent 3.2: Quaternion L-BFGS
 	fmt.Println()
 	fmt.Println("Agent 3.2: Quaternion L-BFGS...")
 	protein32 := phase2BestProtein.Copy()
-	result32 := optimization.QuaternionLBFGS(protein32, 100, 0.01, 0.1)
-	rmsd32 := validation.CalculateRMSD(protein32, nativeProtein)
+	lbfgsConfig := optimization.LBFGSConfig{
+		MaxIterations:     100,
+		GradientTolerance: 0.01,
+		InitialStepSize:   0.1,
+		EnergyTolerance:   1e-6,
+		MemorySize:        10,
+		MaxStepSize:       2.0,
+	}
+	result32, err := optimization.MinimizeLBFGS(protein32, lbfgsConfig)
+	var rmsd32 float64
+	if err != nil {
+		log.Printf("Agent 3.2 failed: %v", err)
+		rmsd32 = 999.9
+	} else {
+		rmsd32, err = validation.CalculateRMSD(protein32, nativeProtein)
+		if err != nil {
+			rmsd32 = 999.9
+		}
+	}
 	energy32 := folding.CalculateEnergy(protein32)
 	fmt.Printf("  RMSD: %.2f Å, Energy: %.2f kcal/mol\n", rmsd32, energy32)
-	fmt.Printf("  Iterations: %d, Final gradient: %.6f\n", result32.Iterations, result32.GradientNorm)
+	if result32 != nil {
+		fmt.Printf("  Iterations: %d, Final gradient: %.6f\n", result32.Iterations, result32.FinalGradientNorm)
+	}
 
 	// Agent 3.3: Simulated Annealing
 	fmt.Println()
 	fmt.Println("Agent 3.3: Simulated Annealing...")
 	protein33 := phase2BestProtein.Copy()
-	result33 := optimization.SimulatedAnnealing(protein33, 2000, 300.0, 0.98)
-	rmsd33 := validation.CalculateRMSD(protein33, nativeProtein)
+	saConfig := optimization.DefaultSimulatedAnnealingConfig()
+	saConfig.NumSteps = 2000
+	saConfig.TemperatureInitial = 300.0
+	saConfig.TemperatureFinal = 1.0
+	result33, err := optimization.SimulatedAnnealing(protein33, saConfig)
+	var rmsd33 float64
+	if err != nil {
+		log.Printf("Agent 3.3 failed: %v", err)
+		rmsd33 = 999.9
+	} else {
+		rmsd33, err = validation.CalculateRMSD(protein33, nativeProtein)
+		if err != nil {
+			rmsd33 = 999.9
+		}
+	}
 	energy33 := folding.CalculateEnergy(protein33)
 	fmt.Printf("  RMSD: %.2f Å, Energy: %.2f kcal/mol\n", rmsd33, energy33)
-	fmt.Printf("  Accepted: %d/%d (%.1f%%)\n", result33.AcceptedMoves, result33.TotalMoves,
-		float64(result33.AcceptedMoves)/float64(result33.TotalMoves)*100)
+	if result33 != nil {
+		fmt.Printf("  Accepted: %d/%d (%.1f%%)\n", result33.AcceptedSteps, result33.Steps,
+			result33.AcceptanceRate*100)
+	}
 
 	// Agent 3.4: Constraint-Guided Refinement
 	fmt.Println()
 	fmt.Println("Agent 3.4: Constraint-Guided Refinement...")
 	protein34 := phase2BestProtein.Copy()
-	optimization.ConstraintGuidedRefinement(protein34, 100)
-	rmsd34 := validation.CalculateRMSD(protein34, nativeProtein)
+	constraintConfig := optimization.DefaultConstraintConfig()
+	constraintConfig.SecondaryStructureWeight = 1.0
+	constraintConfig.HydrophobicCoreWeight = 0.5
+	constraintConfig.RamachandranWeight = 2.0
+	err = optimization.ConstraintGuidedRefinement(protein34, constraintConfig, 100)
+	var rmsd34 float64
+	if err != nil {
+		log.Printf("Agent 3.4 failed: %v", err)
+		rmsd34 = 999.9
+	} else {
+		rmsd34, err = validation.CalculateRMSD(protein34, nativeProtein)
+		if err != nil {
+			rmsd34 = 999.9
+		}
+	}
 	energy34 := folding.CalculateEnergy(protein34)
 	fmt.Printf("  RMSD: %.2f Å, Energy: %.2f kcal/mol\n", rmsd34, energy34)
 
 	// Select best Phase 3 result
 	results := []struct {
 		name    string
-		protein *folding.Protein
+		protein *parser.Protein
 		rmsd    float64
 		energy  float64
 	}{

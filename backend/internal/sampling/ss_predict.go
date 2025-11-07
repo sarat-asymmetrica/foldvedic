@@ -69,7 +69,7 @@ func PredictSecondaryStructure(sequence string) SecondaryStructurePrediction {
 	for i := 0; i < n; i++ {
 		// Define window around position i
 		start := max(0, i-windowSize/2)
-		end := min(n, i+windowSize/2+1)
+		end := minInt(n, i+windowSize/2+1)
 
 		helixScore := 0.0
 		sheetScore := 0.0
@@ -246,7 +246,7 @@ func max(a, b int) int {
 	return b
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

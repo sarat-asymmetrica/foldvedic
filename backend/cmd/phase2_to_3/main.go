@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/sarat-asymmetrica/foldvedic/backend/internal/folding"
+	_ "github.com/sarat-asymmetrica/foldvedic/backend/internal/folding" // Keep import for side effects
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/optimization"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/parser"
 	"github.com/sarat-asymmetrica/foldvedic/backend/internal/validation"
@@ -30,7 +30,7 @@ type StructureResult struct {
 	RMSDAng         float64 `json:"rmsd_angstrom"`
 	EnergyKcalMol   float64 `json:"energy_kcal_mol"`
 	VedicScore      float64 `json:"vedic_score"`
-	Protein         *folding.Protein `json:"-"` // Not serialized, but available
+	Protein         *parser.Protein `json:"-"` // Not serialized, but available
 }
 
 func main() {
@@ -60,7 +60,10 @@ func main() {
 	fmt.Println()
 
 	// Step 3: Verify starting RMSD matches Phase 2
-	startRMSD := validation.CalculateRMSD(bestStructure, nativeProtein)
+	startRMSD, err := validation.CalculateRMSD(bestStructure, nativeProtein)
+	if err != nil {
+		log.Fatalf("Failed to calculate starting RMSD: %v", err)
+	}
 	fmt.Printf("Step 3: Verifying starting RMSD...\n")
 	fmt.Printf("   Starting RMSD: %.2f Å\n", startRMSD)
 	fmt.Printf("   Phase 2 RMSD: %.2f Å\n", phase2Results.BestRMSDAng)
@@ -81,8 +84,17 @@ func main() {
 	fmt.Println("Agent 3.1: Enhanced Gentle Relaxation...")
 	agent31Start := time.Now()
 	protein31 := bestStructure.Copy()
-	optimization.EnhancedGentleRelaxation(protein31, 100, 0.001)
-	rmsd31 := validation.CalculateRMSD(protein31, nativeProtein)
+	config := optimization.DefaultGentleRelaxationConfig()
+	config.MaxSteps = 100
+	config.StepSize = 0.001
+	_, err = optimization.GentleRelax(protein31, config)
+	if err != nil {
+		log.Printf("Agent 3.1 failed: %v", err)
+	}
+	rmsd31, err := validation.CalculateRMSD(protein31, nativeProtein)
+	if err != nil {
+		rmsd31 = 999.9
+	}
 	agent31Duration := time.Since(agent31Start)
 	fmt.Printf("   RMSD: %.2f Å (%.3fs)\n", rmsd31, agent31Duration.Seconds())
 	fmt.Println()
@@ -91,31 +103,66 @@ func main() {
 	fmt.Println("Agent 3.2: Quaternion L-BFGS...")
 	agent32Start := time.Now()
 	protein32 := bestStructure.Copy()
-	result32 := optimization.QuaternionLBFGS(protein32, 100, 0.01, 0.1)
-	rmsd32 := validation.CalculateRMSD(protein32, nativeProtein)
+	lbfgsConfig := optimization.LBFGSConfig{
+		MaxIterations:     100,
+		GradientTolerance: 0.01,
+		InitialStepSize:   0.1,
+		EnergyTolerance:   1e-6,
+		MemorySize:        10,
+		MaxStepSize:       2.0,
+	}
+	result32, err := optimization.MinimizeLBFGS(protein32, lbfgsConfig)
+	if err != nil {
+		log.Printf("Agent 3.2 failed: %v", err)
+	}
+	rmsd32, err := validation.CalculateRMSD(protein32, nativeProtein)
+	if err != nil {
+		rmsd32 = 999.9
+	}
 	agent32Duration := time.Since(agent32Start)
 	fmt.Printf("   RMSD: %.2f Å (%.3fs)\n", rmsd32, agent32Duration.Seconds())
-	fmt.Printf("   Iterations: %d, Final gradient: %.6f\n", result32.Iterations, result32.GradientNorm)
+	if result32 != nil {
+		fmt.Printf("   Iterations: %d, Final gradient: %.6f\n", result32.Iterations, result32.FinalGradientNorm)
+	}
 	fmt.Println()
 
 	// Agent 3.3: Simulated Annealing
 	fmt.Println("Agent 3.3: Simulated Annealing...")
 	agent33Start := time.Now()
 	protein33 := bestStructure.Copy()
-	result33 := optimization.SimulatedAnnealing(protein33, 2000, 300.0, 0.98)
-	rmsd33 := validation.CalculateRMSD(protein33, nativeProtein)
+	saConfig := optimization.DefaultSimulatedAnnealingConfig()
+	saConfig.NumSteps = 2000
+	saConfig.TemperatureInitial = 300.0
+	saConfig.TemperatureFinal = 1.0
+	result33, err := optimization.SimulatedAnnealing(protein33, saConfig)
+	if err != nil {
+		log.Printf("Agent 3.3 failed: %v", err)
+	}
+	rmsd33, err := validation.CalculateRMSD(protein33, nativeProtein)
+	if err != nil {
+		rmsd33 = 999.9
+	}
 	agent33Duration := time.Since(agent33Start)
 	fmt.Printf("   RMSD: %.2f Å (%.3fs)\n", rmsd33, agent33Duration.Seconds())
-	fmt.Printf("   Accepted: %d/%d (%.1f%%)\n", result33.AcceptedMoves, result33.TotalMoves,
-		float64(result33.AcceptedMoves)/float64(result33.TotalMoves)*100)
+	if result33 != nil {
+		fmt.Printf("   Accepted: %d/%d (%.1f%%)\n", result33.AcceptedSteps, result33.Steps,
+			result33.AcceptanceRate*100)
+	}
 	fmt.Println()
 
 	// Agent 3.4: Constraint-Guided Refinement
 	fmt.Println("Agent 3.4: Constraint-Guided Refinement...")
 	agent34Start := time.Now()
 	protein34 := bestStructure.Copy()
-	optimization.ConstraintGuidedRefinement(protein34, 100)
-	rmsd34 := validation.CalculateRMSD(protein34, nativeProtein)
+	constraintConfig := optimization.DefaultConstraintConfig()
+	err = optimization.ConstraintGuidedRefinement(protein34, constraintConfig, 100)
+	if err != nil {
+		log.Printf("Agent 3.4 failed: %v", err)
+	}
+	rmsd34, err := validation.CalculateRMSD(protein34, nativeProtein)
+	if err != nil {
+		rmsd34 = 999.9
+	}
 	agent34Duration := time.Since(agent34Start)
 	fmt.Printf("   RMSD: %.2f Å (%.3fs)\n", rmsd34, agent34Duration.Seconds())
 	fmt.Println()
@@ -126,7 +173,7 @@ func main() {
 	fmt.Println("Step 5: Selecting best result...")
 	results := []struct {
 		name    string
-		protein *folding.Protein
+		protein *parser.Protein
 		rmsd    float64
 	}{
 		{"Gentle Relaxation", protein31, rmsd31},
@@ -165,7 +212,7 @@ func main() {
 	}
 }
 
-func loadPhase2Results(filename string) (*Phase2Results, *folding.Protein) {
+func loadPhase2Results(filename string) (*Phase2Results, *parser.Protein) {
 	// Read JSON file
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -181,7 +228,7 @@ func loadPhase2Results(filename string) (*Phase2Results, *folding.Protein) {
 	}
 
 	// Find best structure (lowest RMSD)
-	var bestStructure *folding.Protein
+	var bestStructure *parser.Protein
 	bestRMSD := 999999.9
 	bestID := -1
 
@@ -217,7 +264,7 @@ func loadPhase2Results(filename string) (*Phase2Results, *folding.Protein) {
 	return &results, bestStructure
 }
 
-func regenerateBestStructure(results *Phase2Results, nativeProtein *folding.Protein) *folding.Protein {
+func regenerateBestStructure(results *Phase2Results, nativeProtein *parser.Protein) *parser.Protein {
 	// This is a temporary workaround - ideally Phase 2 would save
 	// the actual best structure coordinates to a PDB file
 
@@ -232,9 +279,9 @@ func regenerateBestStructure(results *Phase2Results, nativeProtein *folding.Prot
 	for _, residue := range protein.Residues {
 		if residue.CA != nil {
 			// Add small random perturbation
-			residue.CA.X += (0.5 - float64(residue.ID%100)/100.0) * 2.0
-			residue.CA.Y += (0.5 - float64((residue.ID+33)%100)/100.0) * 2.0
-			residue.CA.Z += (0.5 - float64((residue.ID+67)%100)/100.0) * 2.0
+			residue.CA.X += (0.5 - float64(residue.SeqNum%100)/100.0) * 2.0
+			residue.CA.Y += (0.5 - float64((residue.SeqNum+33)%100)/100.0) * 2.0
+			residue.CA.Z += (0.5 - float64((residue.SeqNum+67)%100)/100.0) * 2.0
 		}
 	}
 
